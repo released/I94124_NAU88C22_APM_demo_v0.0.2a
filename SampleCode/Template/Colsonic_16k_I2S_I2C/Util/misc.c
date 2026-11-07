@@ -160,8 +160,11 @@ void Colsonic_Init(void)
  * bFarReady is published by TX but is NOT required or cleared here.
  * No frame sequence or timestamps validate Near/Far temporal alignment.
  * APM consumes 320 signed mono samples per input (20 ms at 16 kHz).
- * Normal word: high16 Near, low16 Decode (I2S L=Decode, R=Near).
- * Bypass word: high16 Far, low16 Near (I2S L=Near, R=Far).
+ * Normal word: high16 Decode, low16 Near (I2S L=Near, R=Decode).
+ * Match USB and the APM v0.0.5 sample: left raw mic, right processed.
+ * Transport channel order is selectable; APM Near/Far input roles stay fixed.
+ * Bypass word: high16 Near, low16 Far (I2S L=Far, R=Near).
+ * The right uplink carries processed voice normally, raw voice in bypass.
  * Bypass changes output selection only; the APM call still executes.
  * The output queue counts stereo uint32_t words, not bytes. Ready flags do
  * not protect frame ownership if foreground processing falls behind.
@@ -185,8 +188,8 @@ void Colsonic_Work_Handle(void)
 			for(i = 0;i < COLSONIC_DAT_LEN; i++)
 			{
 				g_sDataManager.u32Decode[g_sDataManager.u8Decode_Buf_Idx][i] = 
-				//    (g_sDataManager.u16DecodeTmp[i]<<16)|g_sDataManager.pu16Near[i];
-					(g_sDataManager.pu16Near[i]<<16)|g_sDataManager.u16DecodeTmp[i];
+					((uint32_t)g_sDataManager.u16DecodeTmp[i] << 16) |
+                    (uint32_t)g_sDataManager.pu16Near[i];
 			}
 		}
 		else
@@ -194,7 +197,8 @@ void Colsonic_Work_Handle(void)
 			for(i = 0;i < COLSONIC_DAT_LEN; i++)
 			{
 				g_sDataManager.u32Decode[g_sDataManager.u8Decode_Buf_Idx][i] = 
-					(g_sDataManager.pu16Far[i]<<16)|g_sDataManager.pu16Near[i];
+					((uint32_t)g_sDataManager.pu16Near[i] << 16) |
+                    (uint32_t)g_sDataManager.pu16Far[i];
 			}			
 		}
 		

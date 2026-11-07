@@ -100,7 +100,7 @@ typedef struct _data_manager_t
 	uint8_t u8NearDmicTmp_Buf_Idx;
 	
 	// Colsonic
-	uint8_t bByPass; // Uplink selection: normal Decode/Near, bypass Near/Far.
+	uint8_t bByPass; // Uplink L/R selection: normal Near/Decode, bypass Far/Near.
 	uint16_t* pu16Near;
 	uint8_t bNearReady;
 	uint16_t* pu16Far;

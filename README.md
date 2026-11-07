@@ -25,20 +25,20 @@
 - **Far＝準備送去喇叭播放的數位參考。** 例如 PC／host 送來的音樂或新聞；播放素材裡的歌聲、播報人聲也屬於 Far。
 - **Decode＝Near 經 AEC/NR 處理後的結果。** 目標是保留現場人聲、降低回音與雜音；實際仍可能有殘餘背景或人聲損失，效果以錄音量測為準。
 
-**口訣：USB 左前右後；I2C 正常左後右前；I2C bypass 左收右播。**「前／後」指 APM 處理前／後，「收／播」指麥克風收音／數位播放參考。
+**口訣：USB／I2C 正常都是左前右後；I2C bypass 左播右收。**「前／後」指 APM 處理前／後，「播／收」指數位播放參考／麥克風收音。
 
 | 模式 | 左聲道代表什麼 | 右聲道代表什麼 | 比較用途 |
 |---|---|---|---|
 | **USB 正常：Near／Decode** | **處理前**：麥克風原始收音 | **處理後**：AEC/NR 結果 | 左邊聽原始人聲＋背景，右邊聽處理後保留多少人聲、剩多少背景 |
-| **I2C/I2S 正常：Decode／Near** | **處理後**：AEC/NR 結果 | **處理前**：麥克風原始收音 | 比較目的與 USB 相同，但左右位置相反 |
-| **僅 I2C/I2S 可操作的 bypass：Near／Far** | **收音**：麥克風實際收到的人聲＋背景 | **播放參考**：送往喇叭的音樂／新聞 PCM | 對照麥克風收到什麼、程式拿什麼當播放參考；這組輸出沒有 Decode |
+| **I2C/I2S 正常：Near／Decode** | **處理前**：麥克風原始收音 | **處理後**：AEC/NR 結果 | 與 USB 相同：左邊觀察原始收音，右邊觀察處理結果 |
+| **僅 I2C/I2S 可操作的 bypass：Far／Near** | **播放參考**：送往喇叭的音樂／新聞 PCM | **收音**：麥克風實際收到的人聲＋背景 | 對照播放參考與實際收音；這組輸出沒有 Decode |
 
 例如 PC 經本板播放音樂，同時在麥克風前說「你好」：
 
 - Near：麥克風可能同時收到「你好」與音樂回音。
 - Far：送來播放的音樂 PCM。
 - Decode：上述收音經 AEC/NR 處理後的結果。
-- USB 正常模式為左原始混合聲、右處理結果；I2C 正常模式左右交換。
+- USB 與 I2C/I2S 正常模式均為左原始混合聲、右處理結果。
 
 - **正常模式比較「處理前／後」**：Near 與 Decode 用於觀察處理效果。
 - **Bypass 對照「麥克風收音／播放參考」**：只切換回傳內容，APM 仍會執行。
@@ -104,17 +104,17 @@ flowchart TD
     PACK --> HOST["USB record 或 SPI2-I2S TX → Host"]
 ```
 
-## 3. 舊專案聲道 matrix：兩個範例確實不同
+## 3. 聲道 matrix：上行觀察聲道配置
 
 - 一個 `uint32_t` stereo word 包含兩個 16-bit PCM sample。
 - 下表依程式封裝、I2S `EVENLOW` 與 USB little-endian 順序，稱低 16 bits 為左、高 16 bits 為右。
 - I2S host 的左右位置以實際 LRCK／slot 設定為準。
 
-| 舊專案模式 | 左／word 低 16 bits | 右／word 高 16 bits | `u32Decode` 的封裝公式 | 最後輸出 buffer |
+| 模式 | 左／word 低 16 bits | 右／word 高 16 bits | `u32Decode` 的封裝公式 | 最後輸出 buffer |
 |---|---|---|---|---|
 | USB 正常，預設 | **Near：處理前麥克風** | **Decode：處理後** | `(Decode << 16) \| Near` | USB record `au8USB_RingBuff` → EP2 |
-| I2C/I2S 正常，`0x13=1`，預設 | **Decode：處理後** | **Near：處理前麥克風** | `(Near << 16) \| Decode` | `au32SPI_I2S_Tx_Buff` → SPI2 TX |
-| I2C/I2S bypass，`0x13=0` | **Near：處理前麥克風** | **Far：數位播放參考** | `(Far << 16) \| Near` | `au32SPI_I2S_Tx_Buff` → SPI2 TX |
+| I2C/I2S 正常，`0x13=1`，預設 | **Near：處理前麥克風** | **Decode：處理後** | `(Decode << 16) \| Near` | `au32SPI_I2S_Tx_Buff` → SPI2 TX |
+| I2C/I2S bypass，`0x13=0` | **Far：數位播放參考** | **Near：處理前麥克風** | `(Near << 16) \| Far` | `au32SPI_I2S_Tx_Buff` → SPI2 TX |
 | USB 內部 bypass 分支 | **Far：數位播放參考** | **Near：處理前麥克風** | `(Near << 16) \| Far` | USB record `au8USB_RingBuff` → EP2 |
 
 - USB 的 `bAlgByPass` 靜態初值為 0，沒有 command／操作入口；上表保留原碼的內部分支排列。
@@ -123,7 +123,11 @@ flowchart TD
 
 - GoldWave 的 USB 正常錄音：**左邊為原始麥克風，右邊為處理後結果**。
 - Near 包含人聲及背景；Decode 仍可能有殘餘背景，Far 則另有其數位播放來源。
-- I2C 正常輸出的 Near／Decode 位置與 USB 相反。
+- 左右聲道由 `Colsonic_Work_Handle()` 將兩個 mono 訊號封裝成 stereo word 時決定；APM 本身沒有指定 Near 或 Decode 必須放左聲道。
+- APM 的輸入角色固定為 `Near`（麥克風）與 `Far`（播放參考）；交換上行左右位置不會交換這兩個演算法輸入。
+- 相容性：原始 I2C 範例正常模式是左 Decode、右 Near；目前已統一為左 Near、右 Decode，與 USB 及新版 APM v0.0.5 範例相同。處理結果由 host 的右聲道取得。
+- I2C bypass 也與新版 APM v0.0.5 相同：左 Far、右 Near；原始範例為左 Near、右 Far。
+- I2C 右聲道在正常模式為處理後的 Decode，在 bypass 為處理前的 Near，適合 host 固定以右聲道接收語音。
 
 ## 4. RAM／PDMA buffer matrix
 
@@ -215,7 +219,7 @@ powershell -NoProfile -File .\tools\check_apm_consistency.ps1
 1. 依 Keil 專案選擇範例及 target，codec、pin、clock 與 `setting.h` 應符合實際板子。
 2. USB：PC 播放裝置與 GoldWave 錄音來源均選本板 UAC，錄音格式為 16 kHz／16-bit／stereo。
 3. 先以背景播放觀察 Near／Decode，再加入現場人聲比較雙講行為。舊 USB 左 Near、右 Decode。初始素材可使用 L/R 相同內容，以涵蓋 Far 只取播放低 16 bits 的路徑。
-4. I2C/I2S：MCU 的 SPI2-I2S 為 **master**，host 配合時脈／格式；正常輸出為左 Decode、右 Near，bypass 為左 Near、右 Far。
+4. I2C/I2S：MCU 的 SPI2-I2S 為 **master**，host 配合時脈／格式；正常輸出為左 Near、右 Decode，bypass 為左 Far、右 Near。
 5. 無聲時的資料路徑檢查順序為來源輸入、PDMA available、Near／Far ready、`u32Decode` 產出及輸出 queue 消耗。各階段函式與 underrun 行為列於完整流程文件。
 
 ### I2C 音訊啟停與回讀

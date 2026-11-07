@@ -58,8 +58,8 @@ flowchart TD
     NEAR --> APM
     FAR --> APM
     APM --> MODE{"bByPass？"}
-    MODE -->|"FALSE：正常"| NORMAL["左 Decode／右 Near"]
-    MODE -->|"TRUE：bypass"| BYPASS["左 Near／右 Far"]
+    MODE -->|"FALSE：正常"| NORMAL["左 Near／右 Decode"]
+    MODE -->|"TRUE：bypass"| BYPASS["左 Far／右 Near"]
     NORMAL --> QUEUE["u32Decode：2 × 320 packed words"]
     BYPASS --> QUEUE
     QUEUE --> STX["SPI TX IRQ：每次取 32 words／不足補零"]
@@ -90,10 +90,15 @@ flowchart TD
 
 | 模式 | 左／低 16 bits | 右／高 16 bits | 中間 RAM → 最終 PDMA |
 |---|---|---|---|
-| 正常，預設 `0x13=1` | `u16DecodeTmp[i]`：Decode | `pu16Near[i]`：Near | `u32Decode` → `au32SPI_I2S_Tx_Buff` → SPI2 TX |
-| bypass，`0x13=0` | `pu16Near[i]`：Near | `pu16Far[i]`：Far | 同上 |
+| 正常，預設 `0x13=1` | `pu16Near[i]`：Near | `u16DecodeTmp[i]`：Decode | `u32Decode` → `au32SPI_I2S_Tx_Buff` → SPI2 TX |
+| bypass，`0x13=0` | `pu16Far[i]`：Far | `pu16Near[i]`：Near | 同上 |
 
-這是**舊 I2C 專案的排列**：正常是 Decode／Near，與舊 USB 正常的 Near／Decode 相反。`bypass` 沒有跳過 APM，並非獨立關閉 NR；只是傳回不同訊號供觀察。
+- 正常模式與 USB、新版 APM v0.0.5 範例一致：左 Near、右 Decode，封裝為 `((uint32_t)Decode << 16) | Near`。
+- 左右內容由 `Colsonic_Work_Handle()` 的封裝決定；`Colsonic_apm_proc(Near, Far, Decode)` 的麥克風／播放參考輸入角色維持原設定。
+- 相容性：原始 I2C 範例正常模式為左 Decode、右 Near；目前 host 改由右聲道取得處理結果。
+- bypass 與新版 APM v0.0.5 相同：左 Far、右 Near，封裝為 `((uint32_t)Near << 16) | Far`；原始 I2C 範例為左 Near、右 Far。
+- I2C 右聲道在正常模式是 Decode，在 bypass 是 Near；host 可固定由右聲道接收語音。
+- `bypass` 只選擇上行訊號，APM 仍會執行；不是獨立 NR 開關。
 
 | Buffer／descriptor | 容量 | 產生者 → 消耗者 | 計數／索引 |
 |---|---|---|---|
@@ -179,7 +184,7 @@ flowchart TD
 | CMD／名稱 | 寫入 DATA／動作 | 回讀一個 byte | 影響／注意事項 |
 |---|---|---|---|
 | `0x12 SYS_CMD` | `0` Stop、`1` Start；只在目標狀態與目前完成狀態不同時呼叫 stop/start | `g_bStreaming`，0/1 | 控制 CODEC＋host I2S／PDMA；Stop 同時重新初始化 APM。Lifecycle 完成後才更新狀態；開機自動啟動完成後為 1 |
-| `0x13 AEC_NR_CMD` | `0` bypass、`1` 正常，預設 1 | `g_bAEC`，0/1 | 呼叫 `Set_AEC_ByPass()`；選 Near/Far 或 Decode/Near，**不是獨立 NR enable** |
+| `0x13 AEC_NR_CMD` | `0` bypass、`1` 正常，預設 1 | `g_bAEC`，0/1 | 呼叫 `Set_AEC_ByPass()`；選 Far/Near 或 Near/Decode，**不是獨立 NR enable** |
 | `0x14 DAC_VOLUME_CMD` | `00..FF` 原始 DAC volume code，OR update bit `0x100` | 左 DAC cache byte `[1]` | 寫 codec `0x0B/0x0C`，影響播放輸出；不是 APM 參數 |
 | `0x15 SPKOUT_VOLUME_MUTE_CMD` | `0` unmute、`1` mute | `g_bMute`，0/1 | 改 codec `0x36/0x37` bit 6；不呼叫 `Set_I2S_Tx_Mute()`，Far RAM 仍可能有播放 PCM |
 | `0x16 SPKOUT_VOLUME_UP_CMD` | DATA 忽略；依左 speaker cache 低 6 bits 加一，最多 `3F` | 不支援，`FE` | 寫 `0x36/0x37`；使用 `16 01 00`，以 `0x1E` 確認音量 |
@@ -198,8 +203,8 @@ DAC／ADC／PGA／speaker code 是 **register 原始索引**，不是百分比�
 
 ```text
 12 01 01    Start：已啟動時維持執行，不重新初始化傳輸
-13 01 01    正常上行：左 Decode、右 Near
-13 01 00    bypass 上行：左 Near、右 Far
+13 01 01    正常上行：左 Near、右 Decode
+13 01 00    bypass 上行：左 Far、右 Near
 13 01 01    回到正常上行
 15 01 01    CODEC speaker mute
 15 01 00    CODEC speaker unmute

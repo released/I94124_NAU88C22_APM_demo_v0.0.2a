@@ -166,6 +166,7 @@ void pdma_dmic_handler(DATA_MANAGER* psDataManager)
 /*
  * Host uplink: drain 32 packed words from the 640-word u32Decode queue
  * into the completed SPI TX row; output zeros when fewer words are ready.
+ * Copy packed words unchanged: normal L=Near/R=Decode, bypass L=Far/R=Near.
  * The DMA sends that row to the host on its next turn.
  */
 void pdma_spi_i2s_tx_handler(DATA_MANAGER* psDataManager)

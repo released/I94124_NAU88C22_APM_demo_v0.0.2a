@@ -9,6 +9,7 @@
 **/KEIL/lst/
 *.uvguix.*
 **/KEIL/Nu_Link_Driver.ini
+/tests/__pycache__/
 
 # Local logic-analyzer captures and archived algorithm variants.
 **/__LA/

@@ -5,7 +5,7 @@
  * External I2C0 protocol: write CMD, LEN, DATA; read one selected CMD byte.
  * Use LEN=1 for all value writes below; 0x16/0x17 ignore that data byte.
  * 0x19/0x1A are read-only; 0x1B is excluded unless CODEC_ALC_FUNC is defined.
- * 0x13 selects uplink packing (normal Decode/Near, bypass Near/Far).
+ * 0x13 selects uplink L/R packing (normal Near/Decode, bypass Far/Near).
  * It does not stop APM execution or independently disable noise suppression.
  * See ../../Colsonic_16k_I2S_I2C.md for the complete command matrix.
  */
