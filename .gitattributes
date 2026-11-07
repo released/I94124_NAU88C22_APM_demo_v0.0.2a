@@ -1,0 +1,11 @@
+# Preserve existing SDK/source encodings and line endings across checkouts.
+* -text
+
+*.lib binary
+*.a binary
+*.bin binary
+*.pdf binary
+*.xlsx binary
+*.jpg binary
+*.png binary
+*.sfd binary

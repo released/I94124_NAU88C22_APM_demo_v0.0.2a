@@ -1,0 +1,15 @@
+# Local engineering records and machine-specific cleanup notes.
+/docs/verification/
+/.local/
+/MANUAL_CLEANUP.md
+/CODEX_HANDOFF.md
+
+# Keil generated output and per-user UI state.
+**/KEIL/obj/
+**/KEIL/lst/
+*.uvguix.*
+**/KEIL/Nu_Link_Driver.ini
+
+# Local logic-analyzer captures and archived algorithm variants.
+**/__LA/
+**/Colsonic/backup/
