@@ -1,6 +1,6 @@
 # I94124 NAU88C22 APM Demo v0.0.2a
 
-本專案提供 I94100／NAU88C22 的 USB UAC 與 I2C/I2S 音訊範例，使用相同的 Colsonic APM library、參數 profile 與記憶體配置。兩種介面的傳輸、處理觸發條件與輸出聲道排列各有差異。
+本專案提供 I94100／NAU88C22 的 USB UAC 與 I2C/I2S 音訊範例，使用相同的 Colsonic APM library、參數 profile 與記憶體配置。兩種介面的傳輸與處理觸發條件不同，正常上行均為左 Near、右 Decode。
 
 - `v0.0.2a` 是 demo 基底標籤，來源為 `Nuvoton_demo_AEC_16k_0.0.2a` 範例名稱。
 - Library 以內嵌識別字串與 SHA-256 追溯，與 demo 基底標籤分別記錄。
@@ -14,35 +14,27 @@
 
 兩份文件與 README 使用 repository 相對連結；目錄結構一併上傳至 GitHub 後，可從首頁開啟完整文件及其中的 Mermaid 流程圖。
 
-## 聲道速記：「收音、播放參考、處理結果」
+## 訊號來源與上行聲道
 
-這裡的**左／右，是板子回傳給 host 的兩個觀察聲道**，用來比較不同階段的訊號。
+Far 是送往喇叭播放的數位參考；Near 是麥克風經 CODEC ADC 收到、尚未進入 APM 的混合收音；Decode 是 AEC/NR 處理後的結果。
 
-- USB：GoldWave 可分別播放或觀察左／右聲道。
-- I2S：embedded host 接收兩個聲道，內容依正常／bypass 模式決定。
+![Far、Near 與 Decode 的水平訊號方塊圖](docs/images/audio_signal_flow.svg)
 
-- **Near＝麥克風收進來的聲音，APM 處理前。** 現場人聲、喇叭傳回麥克風的音樂／回音、環境雜音，都可能在裡面。
-- **Far＝準備送去喇叭播放的數位參考。** 例如 PC／host 送來的音樂或新聞；播放素材裡的歌聲、播報人聲也屬於 Far。
-- **Decode＝Near 經 AEC/NR 處理後的結果。** 目標是保留現場人聲、降低回音與雜音；實際仍可能有殘餘背景或人聲損失，效果以錄音量測為準。
+### USB 與 I2C/I2S 正常輸出
 
-**口訣：USB／I2C 正常都是左前右後；I2C bypass 左播右收。**「前／後」指 APM 處理前／後，「播／收」指數位播放參考／麥克風收音。
+左聲道輸出 Near，右聲道輸出 Decode。PC 錄音與 embedded I2S host 均依此順序接收。
 
-| 模式 | 左聲道代表什麼 | 右聲道代表什麼 | 比較用途 |
-|---|---|---|---|
-| **USB 正常：Near／Decode** | **處理前**：麥克風原始收音 | **處理後**：AEC/NR 結果 | 左邊聽原始人聲＋背景，右邊聽處理後保留多少人聲、剩多少背景 |
-| **I2C/I2S 正常：Near／Decode** | **處理前**：麥克風原始收音 | **處理後**：AEC/NR 結果 | 與 USB 相同：左邊觀察原始收音，右邊觀察處理結果 |
-| **僅 I2C/I2S 可操作的 bypass：Far／Near** | **播放參考**：送往喇叭的音樂／新聞 PCM | **收音**：麥克風實際收到的人聲＋背景 | 對照播放參考與實際收音；這組輸出沒有 Decode |
+![正常模式：左 Near、右 Decode](docs/images/audio_channels_normal.svg)
 
-例如 PC 經本板播放音樂，同時在麥克風前說「你好」：
+### I2C/I2S bypass 輸出
 
-- Near：麥克風可能同時收到「你好」與音樂回音。
-- Far：送來播放的音樂 PCM。
-- Decode：上述收音經 AEC/NR 處理後的結果。
-- USB 與 I2C/I2S 正常模式均為左原始混合聲、右處理結果。
+I2C command `13 01 00` 選擇左 Far、右 Near；此模式只改變回傳訊號，APM 仍會運算。
 
-- **正常模式比較「處理前／後」**：Near 與 Decode 用於觀察處理效果。
-- **Bypass 對照「麥克風收音／播放參考」**：只切換回傳內容，APM 仍會執行。
-- 各訊號的 RAM／PDMA 位置列於後面的聲道及 buffer matrix。
+![僅 I2C/I2S bypass：左 Far、右 Near](docs/images/audio_channels_bypass.svg)
+
+- 左／右是送給 host 的兩個觀察聲道，由程式封裝決定；Near／Far 是 APM 的固定輸入角色。
+- Normal 的右聲道為 Decode，bypass 的右聲道為 Near。USB 不提供可操作的 bypass 入口。
+- RAM、PDMA 與 word 的位元配置列於後面的聲道及 buffer matrix；I2S 實體左右 slot 仍以 host 的 LRCK 設定為準。
 
 ## 1. 範例與專案入口
 
@@ -88,21 +80,7 @@ APM 為封閉的 `.lib`：
 - 應用層可確認輸入、輸出與呼叫條件。
 - 內部雙講偵測、抑制強度及各模組行為，需依 library 定義及實際量測確認。
 
-```mermaid
-flowchart TD
-    PLAY["Host 播放 PCM"] --> TX["MCU：準備 CODEC I2S0 TX buffer"]
-    TX --> DAC["CODEC DAC → 喇叭"]
-    TX --> FAR["低 16 bits → Far：數位播放參考"]
-    DAC -. "聲學回音" .-> MIC["麥克風：人聲＋回音＋環境聲"]
-    SPEECH["現場說話"] --> MIC
-    MIC --> RX["CODEC ADC → I2S0 RX → Near"]
-    RX --> APM["前景 APM：Near＋Far → Decode"]
-    FAR --> APM
-    RX --> PACK["依範例／模式封裝兩個觀察聲道"]
-    FAR --> PACK
-    APM --> PACK
-    PACK --> HOST["USB record 或 SPI2-I2S TX → Host"]
-```
+訊號處理關係與上行聲道配置見前方[水平方塊圖](#訊號來源與上行聲道)。
 
 ## 3. 聲道 matrix：上行觀察聲道配置
 
