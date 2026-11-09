@@ -1,0 +1,32 @@
+%%{init: {"theme": "base", "flowchart": {"htmlLabels": false, "curve": "linear", "nodeSpacing": 35, "rankSpacing": 65, "padding": 16, "wrappingWidth": 420}, "themeVariables": {"fontFamily": "Microsoft JhengHei, Arial, sans-serif", "fontSize": "20px", "primaryTextColor": "#1e293b", "lineColor": "#475569", "edgeLabelBackground": "#ffffff"}, "themeCSS": "text, tspan, .nodeLabel, .edgeLabel {\n  font-family: \"Microsoft JhengHei\", Arial, sans-serif !important;\n}\n", "htmlLabels": false}}%%
+flowchart LR
+    HOST["HOST：embedded<br/>I2S 音訊 / I2C 控制"]
+    MCU["I94124<br/>APM 仍在運算<br/>上行選擇：Far / Near<br/><br/>RAM 與 PDMA 路徑<br/>與 I2C/I2S 正常模式相同"]
+    CODEC["NAU88C22<br/>ADC / DAC"]
+    MIC["MIC<br/>麥克風"]
+    SPK["SPK<br/>喇叭"]
+    HOST -->|"SPI2_RX / ch6：播放 PCM"| MCU
+    MCU -->|"SPI2_TX / ch7：左 Far / 右 Near"| HOST
+    CODEC -->|"I2S0_RX：MIC PCM<br/>低 16 bits 形成 Near"| MCU
+    MCU -->|"I2S0_TX：播放 PCM<br/>低 16 bits 另存 Far"| CODEC
+    MIC -->|"ADC 收音"| CODEC
+    %% Layout-only edges retain MIC above SPK; the visible arrows show actual data direction.
+    CODEC ~~~ MIC
+    CODEC ~~~ MIC
+    CODEC -->|"DAC 播放"| SPK
+    MCU <-->|"I2C1：CODEC register 控制"| CODEC
+    HOST <-->|"I2C0：command / status<br/>不承載 PCM"| MCU
+    HOST ~~~ MCU
+    classDef host fill:#f8fafc,stroke:#334155,stroke-width:2px,font-size:24px
+    classDef mcu fill:#eff6ff,stroke:#1d4ed8,stroke-width:2px,font-size:20px
+    classDef codec fill:#f8fafc,stroke:#475569,stroke-width:2px,font-size:24px
+    classDef near fill:#e6fcf5,stroke:#087f5b,stroke-width:2px,font-size:24px
+    classDef far fill:#fff4e6,stroke:#b95c00,stroke-width:2px,font-size:24px
+    class HOST host
+    class MCU mcu
+    class CODEC codec
+    class MIC near
+    class SPK far
+    linkStyle 0,3,7 stroke:#b95c00,stroke-width:2px
+    linkStyle 1 stroke:#087f5b,stroke-width:2px
+    linkStyle 2,4 stroke:#087f5b,stroke-width:2px

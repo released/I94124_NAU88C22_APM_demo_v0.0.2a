@@ -14,29 +14,199 @@
 
 兩份文件與 README 使用 repository 相對連結；目錄結構一併上傳至 GitHub 後，可從首頁開啟完整文件及其中的 Mermaid 流程圖。
 
-## 訊號來源與上行聲道
+## 1. 訊號與演算法名詞
 
-Far 是送往喇叭播放的數位參考；Near 是麥克風經 CODEC ADC 收到、尚未進入 APM 的混合收音；Decode 是 AEC/NR 處理後的結果。
+| 名詞 | 本程式的實際來源／用途 | 容易誤解的地方 |
+|---|---|---|
+| **Near** | 麥克風經 CODEC ADC、I2S0 RX 接收後，取每個 word 的低 16 bits，尚未經 APM 處理 | 包含現場人聲、喇叭回音及環境雜音；不是只有人聲 |
+| **Far** | 準備送往 CODEC 的 I2S0 TX buffer，取低 16 bits，作為播放參考 | 是數位播放訊號；不是另一顆麥克風，也不是喇叭實際聲壓量測 |
+| **Decode** | `Colsonic_apm_proc(Near, Far, Decode)` 的處理後 PCM 輸出 | 不是 MP3 解碼、語音文字或語音辨識結果 |
+| **AEC** | 以 Far 為參考，處理 Near 裡與播放訊號相關的回音 | 若播放聲沒有經過此板的播放路徑，Far 可能沒有該背景音 |
+| **NR／NS** | Library 內的噪音抑制處理 | 現有 I2C command 沒有獨立的 NR 開關；`0x13` 是輸出選擇，見 I2C 文件 |
+| **I2S TX／RX** | 以 I94124 為基準：I2S0_TX 傳向 CODEC／SPK，I2S0_RX 接收 CODEC／MIC；SPI2_TX/RX 是另一側的 Host 音訊介面 | TX／RX 並非以 CODEC 或 embedded host 為觀察點 |
+| **USB OUT／IN** | 以 USB host 為基準：EP3 OUT 為播放下行，EP2 IN 為錄音上行；EP4 IN 為 playback feedback | USB endpoint 名稱與 MCU 的 TX／RX 視角不同 |
+| **`u32Decode`** | 已封裝兩個觀察聲道的 stereo RAM queue；正常為 Near／Decode，bypass 為 Far／Near | 單聲道 Decode 直接結果在 `u16DecodeTmp`，不是這整個 stereo queue |
 
-![Far、Near 與 Decode 的水平訊號方塊圖](docs/images/audio_signal_flow.svg)
+APM 為封閉的 `.lib`：
 
-### USB 與 I2C/I2S 正常輸出
+- 應用層可確認輸入、輸出與呼叫條件。
+- 內部雙講偵測、抑制強度及各模組行為，需依 library 定義及實際量測確認。
 
-左聲道輸出 Near，右聲道輸出 Decode。PC 錄音與 embedded I2S host 均依此順序接收。
+### 訊號來源與上行聲道
 
-![正常模式：左 Near、右 Decode](docs/images/audio_channels_normal.svg)
+- 設備由左至右排列為 Host、I94124、NAU88C22；MIC 在右上、SPK 在右下。箭頭表示實際資料方向。
+- `I2S0_TX/RX` 與 `SPI2_TX/RX` 均以 **I94124** 為觀察點；USB `OUT/IN` 則以 USB host 為觀察點。
+- 設備在圖上的位置與 stereo 左／右聲道是不同概念；Host 收到的聲道內容另標在上行箭頭。
+
+```mermaid
+%%{init: {"theme": "base", "flowchart": {"htmlLabels": false, "curve": "linear", "nodeSpacing": 35, "rankSpacing": 65, "padding": 16, "wrappingWidth": 420}, "themeVariables": {"fontFamily": "Microsoft JhengHei, Arial, sans-serif", "fontSize": "20px", "primaryTextColor": "#1e293b", "lineColor": "#475569", "edgeLabelBackground": "#ffffff"}, "themeCSS": "text, tspan, .nodeLabel, .edgeLabel {\n  font-family: \"Microsoft JhengHei\", Arial, sans-serif !important;\n}\n", "htmlLabels": false}}%%
+flowchart LR
+    HOST["HOST<br/>PC USB 或 embedded I2S<br/>上行：左 Near / 右 Decode"]
+    MCU["I94124<br/>AEC / NR：Near + Far → Decode<br/><br/>Near：I2S0_RX 低 16 bits<br/>Far：I2S0_TX 低 16 bits"]
+    CODEC["NAU88C22<br/>ADC / DAC"]
+    MIC["MIC<br/>麥克風"]
+    SPK["SPK<br/>喇叭"]
+    HOST -->|"播放 PCM"| MCU
+    MCU --> HOST
+    CODEC -->|"I2S0_RX：MIC PCM<br/>低 16 bits 形成 Near"| MCU
+    MCU -->|"I2S0_TX：播放 PCM<br/>低 16 bits 另存 Far"| CODEC
+    MIC -->|"ADC 收音"| CODEC
+    %% Layout-only edges retain MIC above SPK; the visible arrows show actual data direction.
+    CODEC ~~~ MIC
+    CODEC ~~~ MIC
+    CODEC -->|"DAC 播放"| SPK
+    MCU <-->|"I2C1：CODEC register 控制"| CODEC
+    HOST ~~~ MCU
+    classDef host fill:#f8fafc,stroke:#334155,stroke-width:2px,font-size:24px
+    classDef mcu fill:#eff6ff,stroke:#1d4ed8,stroke-width:2px,font-size:20px
+    classDef codec fill:#f8fafc,stroke:#475569,stroke-width:2px,font-size:24px
+    classDef near fill:#e6fcf5,stroke:#087f5b,stroke-width:2px,font-size:24px
+    classDef far fill:#fff4e6,stroke:#b95c00,stroke-width:2px,font-size:24px
+    class HOST host
+    class MCU mcu
+    class CODEC codec
+    class MIC near
+    class SPK far
+    linkStyle 0,3,7 stroke:#b95c00,stroke-width:2px
+    linkStyle 1 stroke:#6741d9,stroke-width:2px
+    linkStyle 2,4 stroke:#087f5b,stroke-width:2px
+```
+
+[訊號與設備總覽 SVG](docs/images/audio_signal_flow.svg)
+
+### USB UAC 正常輸出
+
+左側 PC 送出 playback PCM，I94124 經 I2S0_TX 送到 CODEC DAC／SPK；MIC 收音經 CODEC ADC、I2S0_RX 回到 I94124。正常錄音為左 Near、右 Decode。
+
+```mermaid
+%%{init: {"theme": "base", "flowchart": {"htmlLabels": false, "curve": "linear", "nodeSpacing": 35, "rankSpacing": 65, "padding": 16, "wrappingWidth": 420}, "themeVariables": {"fontFamily": "Microsoft JhengHei, Arial, sans-serif", "fontSize": "20px", "primaryTextColor": "#1e293b", "lineColor": "#475569", "edgeLabelBackground": "#ffffff"}, "themeCSS": "text, tspan, .nodeLabel, .edgeLabel {\n  font-family: \"Microsoft JhengHei\", Arial, sans-serif !important;\n}\n", "htmlLabels": false}}%%
+flowchart LR
+    HOST["HOST：PC<br/>USB host"]
+    MCU["I94124<br/>AEC / NR：Near + Far → Decode<br/><br/>Host 側 RAM：USB / CPU copy<br/>g_sUacPlayback.au32USB_RingBuff<br/>g_sUacRecord.au8USB_RingBuff<br/>USB endpoint SRAM：EP3 / EP2 / EP4<br/><br/>AEC/NR RAM：前景處理<br/>u16NearI2STmp / u16FarI2STmp<br/>u16DecodeTmp / u32Decode<br/>APM_MemPool<br/><br/>CODEC 側 PDMA RAM<br/>au32I2S_Rx_Buff : ch0<br/>au32I2S_Tx_Buff : ch1"]
+    CODEC["NAU88C22<br/>ADC / DAC"]
+    MIC["MIC<br/>麥克風"]
+    SPK["SPK<br/>喇叭"]
+    HOST -->|"EP3 OUT：播放 PCM"| MCU
+    MCU -->|"EP2 IN：左 Near / 右 Decode"| HOST
+    CODEC -->|"I2S0_RX：MIC PCM<br/>低 16 bits 形成 Near"| MCU
+    MCU -->|"I2S0_TX：播放 PCM<br/>低 16 bits 另存 Far"| CODEC
+    MIC -->|"ADC 收音"| CODEC
+    %% Layout-only edges retain MIC above SPK; the visible arrows show actual data direction.
+    CODEC ~~~ MIC
+    CODEC ~~~ MIC
+    CODEC -->|"DAC 播放"| SPK
+    MCU <-->|"I2C1：CODEC register 控制"| CODEC
+    HOST ~~~ MCU
+    classDef host fill:#f8fafc,stroke:#334155,stroke-width:2px,font-size:24px
+    classDef mcu fill:#eff6ff,stroke:#1d4ed8,stroke-width:2px,font-size:20px
+    classDef codec fill:#f8fafc,stroke:#475569,stroke-width:2px,font-size:24px
+    classDef near fill:#e6fcf5,stroke:#087f5b,stroke-width:2px,font-size:24px
+    classDef far fill:#fff4e6,stroke:#b95c00,stroke-width:2px,font-size:24px
+    class HOST host
+    class MCU mcu
+    class CODEC codec
+    class MIC near
+    class SPK far
+    linkStyle 0,3,7 stroke:#b95c00,stroke-width:2px
+    linkStyle 1 stroke:#6741d9,stroke-width:2px
+    linkStyle 2,4 stroke:#087f5b,stroke-width:2px
+```
+
+[USB 正常輸出與 RAM SVG](docs/images/audio_channels_normal.svg)
+
+- 圖中 RAM 名稱均屬於 I94124。USB endpoint SRAM 與軟體 ring 以 CPU copy 交接，本程式沒有 USB PDMA channel。
+- 播放：EP3 → `g_sUacPlayback.au32USB_RingBuff` → `au32I2S_Tx_Buff` → CODEC／SPK；Far 取實際 TX refill 的低 16 bits。
+- 收音：`au32I2S_Rx_Buff` 累積為 `u16NearI2STmp`；Far 由 TX 側另外累積，兩者一起輸入 APM。
+- 上行：APM 輸出 `u16DecodeTmp`，與 Near 封裝至 `u32Decode`，再經 `g_sUacRecord.au8USB_RingBuff` → EP2。
+
+### I2C/I2S 正常輸出
+
+左側 embedded host 經 SPI2-I2S 收送 PCM，I2C0 只傳 command／status。CODEC 端仍使用 I2S0_TX 播放、I2S0_RX 收音，正常上行為左 Near、右 Decode。
+
+```mermaid
+%%{init: {"theme": "base", "flowchart": {"htmlLabels": false, "curve": "linear", "nodeSpacing": 35, "rankSpacing": 65, "padding": 16, "wrappingWidth": 420}, "themeVariables": {"fontFamily": "Microsoft JhengHei, Arial, sans-serif", "fontSize": "20px", "primaryTextColor": "#1e293b", "lineColor": "#475569", "edgeLabelBackground": "#ffffff"}, "themeCSS": "text, tspan, .nodeLabel, .edgeLabel {\n  font-family: \"Microsoft JhengHei\", Arial, sans-serif !important;\n}\n", "htmlLabels": false}}%%
+flowchart LR
+    HOST["HOST：embedded<br/>I2S 音訊 / I2C 控制"]
+    MCU["I94124<br/>AEC / NR：Near + Far → Decode<br/><br/>Host 側 PDMA RAM<br/>au32SPI_I2S_Rx_Buff : ch6<br/>au32SPI_I2S_Tx_Buff : ch7<br/><br/>AEC/NR RAM：前景處理<br/>u16NearI2STmp / u16FarI2STmp<br/>u16DecodeTmp / u32Decode<br/>APM_MemPool<br/><br/>CODEC 側 PDMA RAM<br/>au32I2S_Rx_Buff : ch0<br/>au32I2S_Tx_Buff : ch1"]
+    CODEC["NAU88C22<br/>ADC / DAC"]
+    MIC["MIC<br/>麥克風"]
+    SPK["SPK<br/>喇叭"]
+    HOST -->|"SPI2_RX / ch6：播放 PCM"| MCU
+    MCU -->|"SPI2_TX / ch7：左 Near / 右 Decode"| HOST
+    CODEC -->|"I2S0_RX：MIC PCM<br/>低 16 bits 形成 Near"| MCU
+    MCU -->|"I2S0_TX：播放 PCM<br/>低 16 bits 另存 Far"| CODEC
+    MIC -->|"ADC 收音"| CODEC
+    %% Layout-only edges retain MIC above SPK; the visible arrows show actual data direction.
+    CODEC ~~~ MIC
+    CODEC ~~~ MIC
+    CODEC -->|"DAC 播放"| SPK
+    MCU <-->|"I2C1：CODEC register 控制"| CODEC
+    HOST <-->|"I2C0：command / status<br/>不承載 PCM"| MCU
+    HOST ~~~ MCU
+    classDef host fill:#f8fafc,stroke:#334155,stroke-width:2px,font-size:24px
+    classDef mcu fill:#eff6ff,stroke:#1d4ed8,stroke-width:2px,font-size:20px
+    classDef codec fill:#f8fafc,stroke:#475569,stroke-width:2px,font-size:24px
+    classDef near fill:#e6fcf5,stroke:#087f5b,stroke-width:2px,font-size:24px
+    classDef far fill:#fff4e6,stroke:#b95c00,stroke-width:2px,font-size:24px
+    class HOST host
+    class MCU mcu
+    class CODEC codec
+    class MIC near
+    class SPK far
+    linkStyle 0,3,7 stroke:#b95c00,stroke-width:2px
+    linkStyle 1 stroke:#6741d9,stroke-width:2px
+    linkStyle 2,4 stroke:#087f5b,stroke-width:2px
+```
+
+[I2C-I2S 正常輸出與 RAM SVG](docs/images/audio_i2s_normal.svg)
+
+- Host 下行：SPI2_RX／PDMA ch6 → `au32SPI_I2S_Rx_Buff` → `au32I2S_Tx_Buff` → I2S0_TX／PDMA ch1 → CODEC／SPK。
+- Host 上行：I2S0_RX／PDMA ch0 → Near frame／APM → `u32Decode` → `au32SPI_I2S_Tx_Buff` → SPI2_TX／PDMA ch7 → Host。
+- `u16NearI2STmp`、`u16FarI2STmp` 儲存 APM 輸入；`u16DecodeTmp` 為單聲道處理結果。`u32Decode` 是封裝後的 stereo queue，並非直接 PDMA buffer。
+- PCM buffer 容量、counter 單位與 PDMA descriptor 位址列於後面的 RAM／PDMA matrix。Descriptor 是搬移控制結構，與 PCM buffer 不同。
 
 ### I2C/I2S bypass 輸出
 
-I2C command `13 01 00` 選擇左 Far、右 Near；此模式只改變回傳訊號，APM 仍會運算。
+I2C command `13 01 00` 選擇左 Far、右 Near；設備、RAM 與 PDMA 路徑維持相同，APM 仍會運算，僅改變上行聲道選擇。USB 不提供可操作的 bypass 入口。
 
-![僅 I2C/I2S bypass：左 Far、右 Near](docs/images/audio_channels_bypass.svg)
+```mermaid
+%%{init: {"theme": "base", "flowchart": {"htmlLabels": false, "curve": "linear", "nodeSpacing": 35, "rankSpacing": 65, "padding": 16, "wrappingWidth": 420}, "themeVariables": {"fontFamily": "Microsoft JhengHei, Arial, sans-serif", "fontSize": "20px", "primaryTextColor": "#1e293b", "lineColor": "#475569", "edgeLabelBackground": "#ffffff"}, "themeCSS": "text, tspan, .nodeLabel, .edgeLabel {\n  font-family: \"Microsoft JhengHei\", Arial, sans-serif !important;\n}\n", "htmlLabels": false}}%%
+flowchart LR
+    HOST["HOST：embedded<br/>I2S 音訊 / I2C 控制"]
+    MCU["I94124<br/>APM 仍在運算<br/>上行選擇：Far / Near<br/><br/>RAM 與 PDMA 路徑<br/>與 I2C/I2S 正常模式相同"]
+    CODEC["NAU88C22<br/>ADC / DAC"]
+    MIC["MIC<br/>麥克風"]
+    SPK["SPK<br/>喇叭"]
+    HOST -->|"SPI2_RX / ch6：播放 PCM"| MCU
+    MCU -->|"SPI2_TX / ch7：左 Far / 右 Near"| HOST
+    CODEC -->|"I2S0_RX：MIC PCM<br/>低 16 bits 形成 Near"| MCU
+    MCU -->|"I2S0_TX：播放 PCM<br/>低 16 bits 另存 Far"| CODEC
+    MIC -->|"ADC 收音"| CODEC
+    %% Layout-only edges retain MIC above SPK; the visible arrows show actual data direction.
+    CODEC ~~~ MIC
+    CODEC ~~~ MIC
+    CODEC -->|"DAC 播放"| SPK
+    MCU <-->|"I2C1：CODEC register 控制"| CODEC
+    HOST <-->|"I2C0：command / status<br/>不承載 PCM"| MCU
+    HOST ~~~ MCU
+    classDef host fill:#f8fafc,stroke:#334155,stroke-width:2px,font-size:24px
+    classDef mcu fill:#eff6ff,stroke:#1d4ed8,stroke-width:2px,font-size:20px
+    classDef codec fill:#f8fafc,stroke:#475569,stroke-width:2px,font-size:24px
+    classDef near fill:#e6fcf5,stroke:#087f5b,stroke-width:2px,font-size:24px
+    classDef far fill:#fff4e6,stroke:#b95c00,stroke-width:2px,font-size:24px
+    class HOST host
+    class MCU mcu
+    class CODEC codec
+    class MIC near
+    class SPK far
+    linkStyle 0,3,7 stroke:#b95c00,stroke-width:2px
+    linkStyle 1 stroke:#087f5b,stroke-width:2px
+    linkStyle 2,4 stroke:#087f5b,stroke-width:2px
+```
 
-- 左／右是送給 host 的兩個觀察聲道，由程式封裝決定；Near／Far 是 APM 的固定輸入角色。
-- Normal 的右聲道為 Decode，bypass 的右聲道為 Near。USB 不提供可操作的 bypass 入口。
-- RAM、PDMA 與 word 的位元配置列於後面的聲道及 buffer matrix；I2S 實體左右 slot 仍以 host 的 LRCK 設定為準。
+[I2C-I2S bypass 輸出 SVG](docs/images/audio_channels_bypass.svg)
 
-## 1. 範例與專案入口
+## 2. 範例與專案入口
 
 | 項目 | USB UAC 範例 | I2C 控制＋I2S 音訊範例 |
 |---|---|---|
@@ -64,23 +234,6 @@ I2C command `13 01 00` 選擇左 Far、右 Near；此模式只改變回傳訊號
 1. 保留完整 repository 目錄結構，包含根目錄 SDK 與 USB 範例自帶的 SDK。
 2. 安裝對應 device pack，開啟上表連結的 Keil 專案與 target。
 3. 執行 Rebuild；AXF／BIN 產生於各範例的 `KEIL/obj/`，由 Git 預設忽略。
-
-## 2. 訊號與演算法名詞
-
-| 名詞 | 本程式的實際來源／用途 | 容易誤解的地方 |
-|---|---|---|
-| **Near** | 麥克風經 CODEC ADC、I2S0 RX 接收後，取每個 word 的低 16 bits，尚未經 APM 處理 | 包含現場人聲、喇叭回音及環境雜音；不是只有人聲 |
-| **Far** | 準備送往 CODEC 的 I2S0 TX buffer，取低 16 bits，作為播放參考 | 是數位播放訊號；不是另一顆麥克風，也不是喇叭實際聲壓量測 |
-| **Decode** | `Colsonic_apm_proc(Near, Far, Decode)` 的處理後 PCM 輸出 | 不是 MP3 解碼、語音文字或語音辨識結果 |
-| **AEC** | 以 Far 為參考，處理 Near 裡與播放訊號相關的回音 | 若播放聲沒有經過此板的播放路徑，Far 可能沒有該背景音 |
-| **NR／NS** | Library 內的噪音抑制處理 | 現有 I2C command 沒有獨立的 NR 開關；`0x13` 是輸出選擇，見 I2C 文件 |
-
-APM 為封閉的 `.lib`：
-
-- 應用層可確認輸入、輸出與呼叫條件。
-- 內部雙講偵測、抑制強度及各模組行為，需依 library 定義及實際量測確認。
-
-訊號處理關係與上行聲道配置見前方[水平方塊圖](#訊號來源與上行聲道)。
 
 ## 3. 聲道 matrix：上行觀察聲道配置
 
